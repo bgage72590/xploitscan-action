@@ -1,5 +1,5 @@
 name: 'XploitScan Security Scanner'
-description: 'Scan your code for security vulnerabilities with 30 core rules (up to 131 with Pro). Built for AI-generated code. Outputs SARIF for GitHub Security tab.'
+description: 'Security scanner for AI-generated code. 30 rules free, 131 with Pro. SARIF + PR comments.'
 author: 'Cipherline LLC'
 branding:
   icon: 'shield'
