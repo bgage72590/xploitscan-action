@@ -1,5 +1,5 @@
 name: 'XploitScan Security Scanner'
-description: 'Security scanner for AI-generated code. 30 rules free, 131 with Pro. SARIF + PR comments.'
+description: 'Scan your code for security vulnerabilities with 30 core rules (up to 131 with Pro). Built for AI-generated code. Outputs SARIF for GitHub Security tab.'
 author: 'Cipherline LLC'
 branding:
   icon: 'shield'
@@ -52,15 +52,38 @@ runs:
         # Install xploitscan
         npm install -g xploitscan@^1.0.0 2>/dev/null || npx --yes xploitscan@^1.0.0 --version
 
-        # Run scan with JSON output to capture results
-        RESULTS=$(npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format json --no-ai 2>/dev/null || echo '{}')
+        # Run scan with JSON output to a temp file (exit code 1 = findings found, not an error)
+        SCAN_JSON=$(mktemp)
+        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format json --no-ai 1>"$SCAN_JSON" 2>/dev/null || true
 
-        # Parse results
-        GRADE=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(j.grade||'?')}catch{console.log('?')}")
-        SCORE=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(j.score||0)}catch{console.log(0)}")
-        FINDINGS=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log((j.findings||[]).length)}catch{console.log(0)}")
-        CRITICAL=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(j.criticalCount||0)}catch{console.log(0)}")
-        HIGH=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(j.highCount||0)}catch{console.log(0)}")
+        # Parse results — compute grade/score/counts from findings since CLI JSON doesn't include them
+        eval "$(node -e "
+          try {
+            const j = JSON.parse(require('fs').readFileSync('$SCAN_JSON', 'utf8'));
+            const f = j.findings || [];
+            const critical = f.filter(x => x.severity === 'critical').length;
+            const high = f.filter(x => x.severity === 'high').length;
+            const medium = f.filter(x => x.severity === 'medium').length;
+            const low = f.filter(x => x.severity === 'low').length;
+            const total = f.length;
+            const files = j.filesScanned || 0;
+            // Scoring: start at 100, deduct per finding
+            let score = Math.max(0, 100 - (critical * 15) - (high * 8) - (medium * 3) - (low * 1));
+            const grade = score >= 95 ? 'A+' : score >= 85 ? 'A' : score >= 70 ? 'B' : score >= 50 ? 'C' : score >= 30 ? 'D' : 'F';
+            console.log('GRADE=' + grade);
+            console.log('SCORE=' + score);
+            console.log('FINDINGS=' + total);
+            console.log('CRITICAL=' + critical);
+            console.log('HIGH=' + high);
+          } catch(e) {
+            console.log('GRADE=?');
+            console.log('SCORE=0');
+            console.log('FINDINGS=0');
+            console.log('CRITICAL=0');
+            console.log('HIGH=0');
+          }
+        ")"
+        rm -f "$SCAN_JSON"
 
         echo "grade=$GRADE" >> $GITHUB_OUTPUT
         echo "score=$SCORE" >> $GITHUB_OUTPUT
@@ -69,8 +92,12 @@ runs:
         echo "high-count=$HIGH" >> $GITHUB_OUTPUT
         echo "sarif-file=${{ inputs.sarif-file }}" >> $GITHUB_OUTPUT
 
-        # Generate SARIF output
-        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format sarif --no-ai > "${{ inputs.sarif-file }}" 2>/dev/null || echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json","runs":[{"tool":{"driver":{"name":"XploitScan","version":"1.0.0","rules":[]}},"results":[]}]}' > "${{ inputs.sarif-file }}"
+        # Generate SARIF output (exit code 1 = findings found, not an error)
+        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format sarif --no-ai > "${{ inputs.sarif-file }}" 2>/dev/null || true
+        # If SARIF file is empty or doesn't exist, write a valid empty SARIF
+        if [ ! -s "${{ inputs.sarif-file }}" ]; then
+          echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json","runs":[{"tool":{"driver":{"name":"XploitScan","version":"1.0.0","rules":[]}},"results":[]}]}' > "${{ inputs.sarif-file }}"
+        fi
 
         # Print summary
         echo ""
@@ -79,7 +106,7 @@ runs:
         echo "Findings: $FINDINGS (Critical: $CRITICAL, High: $HIGH)"
         echo "================================="
 
-        # Also run terminal output for readable logs
+        # Also run terminal output for readable logs (exit code 1 = findings, not error)
         npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --no-ai 2>&1 || true
 
     - name: Upload SARIF to GitHub Security
