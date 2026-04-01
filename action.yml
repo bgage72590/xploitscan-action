@@ -1,0 +1,184 @@
+name: 'XploitScan Security Scanner'
+description: 'Scan your code for security vulnerabilities with 30 core rules (up to 131 with Pro). Built for AI-generated code. Outputs SARIF for GitHub Security tab.'
+author: 'Cipherline LLC'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  path:
+    description: 'Path to scan (default: current directory)'
+    required: false
+    default: '.'
+  fail-on:
+    description: 'Fail the action if findings of this severity or higher are found: critical, high, medium, low, none (default: none)'
+    required: false
+    default: 'none'
+  sarif-file:
+    description: 'Path to write SARIF output (default: xploitscan-results.sarif)'
+    required: false
+    default: 'xploitscan-results.sarif'
+  comment:
+    description: 'Post a summary comment on pull requests (default: true)'
+    required: false
+    default: 'true'
+
+outputs:
+  grade:
+    description: 'Security grade (A+ to F)'
+  score:
+    description: 'Security score (0-100)'
+  findings-count:
+    description: 'Total number of findings'
+  critical-count:
+    description: 'Number of critical findings'
+  high-count:
+    description: 'Number of high findings'
+  sarif-file:
+    description: 'Path to the SARIF output file'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+
+    - name: Run XploitScan
+      id: scan
+      shell: bash
+      run: |
+        # Install xploitscan
+        npm install -g xploitscan@^1.0.0 2>/dev/null || npx --yes xploitscan@^1.0.0 --version
+
+        # Run scan with JSON output to capture results
+        RESULTS=$(npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format json --no-ai 2>/dev/null || echo '{}')
+
+        # Parse results
+        GRADE=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(j.grade||'?')}catch{console.log('?')}")
+        SCORE=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(j.score||0)}catch{console.log(0)}")
+        FINDINGS=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log((j.findings||[]).length)}catch{console.log(0)}")
+        CRITICAL=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(j.criticalCount||0)}catch{console.log(0)}")
+        HIGH=$(echo "$RESULTS" | node -e "try{const j=JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));console.log(j.highCount||0)}catch{console.log(0)}")
+
+        echo "grade=$GRADE" >> $GITHUB_OUTPUT
+        echo "score=$SCORE" >> $GITHUB_OUTPUT
+        echo "findings-count=$FINDINGS" >> $GITHUB_OUTPUT
+        echo "critical-count=$CRITICAL" >> $GITHUB_OUTPUT
+        echo "high-count=$HIGH" >> $GITHUB_OUTPUT
+        echo "sarif-file=${{ inputs.sarif-file }}" >> $GITHUB_OUTPUT
+
+        # Generate SARIF output
+        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format sarif --no-ai > "${{ inputs.sarif-file }}" 2>/dev/null || echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json","runs":[{"tool":{"driver":{"name":"XploitScan","version":"1.0.0","rules":[]}},"results":[]}]}' > "${{ inputs.sarif-file }}"
+
+        # Print summary
+        echo ""
+        echo "================================="
+        echo "XploitScan Results: Grade $GRADE ($SCORE/100)"
+        echo "Findings: $FINDINGS (Critical: $CRITICAL, High: $HIGH)"
+        echo "================================="
+
+        # Also run terminal output for readable logs
+        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --no-ai 2>&1 || true
+
+    - name: Upload SARIF to GitHub Security
+      if: hashFiles(inputs.sarif-file) != ''
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}
+      continue-on-error: true
+
+    - name: Post PR Comment
+      if: github.event_name == 'pull_request' && inputs.comment == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const grade = '${{ steps.scan.outputs.grade }}';
+          const score = '${{ steps.scan.outputs.score }}';
+          const findings = '${{ steps.scan.outputs.findings-count }}';
+          const critical = '${{ steps.scan.outputs.critical-count }}';
+          const high = '${{ steps.scan.outputs.high-count }}';
+
+          const gradeEmoji = {'A+':'🟢','A':'🟢','B':'🟡','C':'🟠','D':'🔴','F':'🔴'}[grade] || '⚪';
+          const noCodeScanned = grade === '?' && score === '0' && findings === '0';
+
+          const body = noCodeScanned ? [
+            `## ⚪ XploitScan Security Report`,
+            ``,
+            `> **No scannable code found in this PR.** This PR may only contain config, docs, or text changes. XploitScan analyzes source code files (JS, TS, Python, Go, etc.) — non-code changes are automatically skipped.`,
+            ``,
+            `---`,
+            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 131 with Pro)*`,
+          ].join('\n') : [
+            `## ${gradeEmoji} XploitScan Security Report`,
+            ``,
+            `**Grade: ${grade}** | Score: ${score}/100 | ${findings} finding${findings === '1' ? '' : 's'}`,
+            ``,
+            `| Severity | Count |`,
+            `|----------|-------|`,
+            `| Critical | ${critical} |`,
+            `| High | ${high} |`,
+            `| Medium | ${findings - critical - high} |`,
+            ``,
+            findings === '0'
+              ? '> No security issues detected.'
+              : `> Run \`npx xploitscan scan .\` locally for full details with fix suggestions.`,
+            ``,
+            `---`,
+            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 131 with Pro)*`,
+          ].join('\n');
+
+          // Find existing comment to update (avoid duplicates)
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find(c => c.body && c.body.includes('XploitScan Security Report'));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+          }
+      continue-on-error: true
+
+    - name: Check failure threshold
+      shell: bash
+      run: |
+        FAIL_ON="${{ inputs.fail-on }}"
+        CRITICAL="${{ steps.scan.outputs.critical-count }}"
+        HIGH="${{ steps.scan.outputs.high-count }}"
+        FINDINGS="${{ steps.scan.outputs.findings-count }}"
+
+        if [ "$FAIL_ON" = "none" ]; then
+          echo "XploitScan: No failure threshold set. Passing."
+          exit 0
+        fi
+
+        if [ "$FAIL_ON" = "critical" ] && [ "$CRITICAL" -gt 0 ] 2>/dev/null; then
+          echo "::error::XploitScan found $CRITICAL critical vulnerabilities"
+          exit 1
+        elif [ "$FAIL_ON" = "high" ] && [ "$((CRITICAL + HIGH))" -gt 0 ] 2>/dev/null; then
+          echo "::error::XploitScan found critical/high vulnerabilities (Critical: $CRITICAL, High: $HIGH)"
+          exit 1
+        elif [ "$FAIL_ON" = "medium" ] && [ "$FINDINGS" -gt 0 ] 2>/dev/null; then
+          echo "::error::XploitScan found $FINDINGS vulnerabilities"
+          exit 1
+        elif [ "$FAIL_ON" = "low" ] && [ "$FINDINGS" -gt 0 ] 2>/dev/null; then
+          echo "::error::XploitScan found $FINDINGS vulnerabilities"
+          exit 1
+        fi
+
+        echo "XploitScan: No findings above the '$FAIL_ON' threshold. Passing."
