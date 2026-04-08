@@ -22,6 +22,10 @@ inputs:
     description: 'Post a summary comment on pull requests (default: true)'
     required: false
     default: 'true'
+  api-key:
+    description: 'XploitScan API key (xpls_...) — generate one in Settings → API Keys. Required to unlock the full 131-rule Pro set; without it the action runs the 30 free rules.'
+    required: false
+    default: ''
 
 outputs:
   grade:
@@ -34,6 +38,10 @@ outputs:
     description: 'Number of critical findings'
   high-count:
     description: 'Number of high findings'
+  medium-count:
+    description: 'Number of medium findings'
+  low-count:
+    description: 'Number of low findings'
   sarif-file:
     description: 'Path to the SARIF output file'
 
@@ -48,6 +56,8 @@ runs:
     - name: Run XploitScan
       id: scan
       shell: bash
+      env:
+        XPLOITSCAN_API_KEY: ${{ inputs.api-key }}
       run: |
         # Install xploitscan
         npm install -g xploitscan@^1.0.0 2>/dev/null || npx --yes xploitscan@^1.0.0 --version
@@ -75,12 +85,16 @@ runs:
             console.log('FINDINGS=' + total);
             console.log('CRITICAL=' + critical);
             console.log('HIGH=' + high);
+            console.log('MEDIUM=' + medium);
+            console.log('LOW=' + low);
           } catch(e) {
             console.log('GRADE=?');
             console.log('SCORE=0');
             console.log('FINDINGS=0');
             console.log('CRITICAL=0');
             console.log('HIGH=0');
+            console.log('MEDIUM=0');
+            console.log('LOW=0');
           }
         ")"
         rm -f "$SCAN_JSON"
@@ -90,6 +104,8 @@ runs:
         echo "findings-count=$FINDINGS" >> $GITHUB_OUTPUT
         echo "critical-count=$CRITICAL" >> $GITHUB_OUTPUT
         echo "high-count=$HIGH" >> $GITHUB_OUTPUT
+        echo "medium-count=$MEDIUM" >> $GITHUB_OUTPUT
+        echo "low-count=$LOW" >> $GITHUB_OUTPUT
         echo "sarif-file=${{ inputs.sarif-file }}" >> $GITHUB_OUTPUT
 
         # Generate SARIF output (exit code 1 = findings found, not an error)
@@ -103,7 +119,7 @@ runs:
         echo ""
         echo "================================="
         echo "XploitScan Results: Grade $GRADE ($SCORE/100)"
-        echo "Findings: $FINDINGS (Critical: $CRITICAL, High: $HIGH)"
+        echo "Findings: $FINDINGS (Critical: $CRITICAL, High: $HIGH, Medium: $MEDIUM, Low: $LOW)"
         echo "================================="
 
         # Also run terminal output for readable logs (exit code 1 = findings, not error)
@@ -126,6 +142,8 @@ runs:
           const findings = '${{ steps.scan.outputs.findings-count }}';
           const critical = '${{ steps.scan.outputs.critical-count }}';
           const high = '${{ steps.scan.outputs.high-count }}';
+          const medium = '${{ steps.scan.outputs.medium-count }}';
+          const low = '${{ steps.scan.outputs.low-count }}';
 
           const gradeEmoji = {'A+':'🟢','A':'🟢','B':'🟡','C':'🟠','D':'🔴','F':'🔴'}[grade] || '⚪';
           const noCodeScanned = grade === '?' && score === '0' && findings === '0';
@@ -144,9 +162,10 @@ runs:
             ``,
             `| Severity | Count |`,
             `|----------|-------|`,
-            `| Critical | ${critical} |`,
-            `| High | ${high} |`,
-            `| Medium | ${findings - critical - high} |`,
+            `| 🔴 Critical | ${critical} |`,
+            `| 🟠 High | ${high} |`,
+            `| 🟡 Medium | ${medium} |`,
+            `| 🔵 Low | ${low} |`,
             ``,
             findings === '0'
               ? '> No security issues detected.'
