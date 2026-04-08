@@ -77,9 +77,20 @@ runs:
             const low = f.filter(x => x.severity === 'low').length;
             const total = f.length;
             const files = j.filesScanned || 0;
-            // Scoring: start at 100, deduct per finding
-            let score = Math.max(0, 100 - (critical * 15) - (high * 8) - (medium * 3) - (low * 1));
-            const grade = score >= 95 ? 'A+' : score >= 85 ? 'A' : score >= 70 ? 'B' : score >= 50 ? 'C' : score >= 30 ? 'D' : 'F';
+            // Scoring matches the web dashboard modal and the CLI calculateGrade function.
+            // Keep all three in sync — changing one without the others will produce
+            // inconsistent grades between CI, terminal, and the web UI.
+            const score = Math.max(0, 100 - (critical * 15) - (high * 7) - (medium * 3) - (low * 1));
+            let grade = score >= 97 ? 'A+' : score >= 90 ? 'A' : score >= 80 ? 'B' : score >= 70 ? 'C' : score >= 60 ? 'D' : 'F';
+            // Severity caps — a scan with serious findings cannot earn a clean grade
+            // regardless of score math.
+            const order = ['A+', 'A', 'B', 'C', 'D', 'F'];
+            const capTo = (cap) => { if (order.indexOf(grade) < order.indexOf(cap)) grade = cap; };
+            if (critical >= 1) capTo('D');
+            else if (high >= 3) capTo('D');
+            else if (high >= 1) capTo('B');
+            else if (medium >= 5) capTo('B');
+            else if (medium >= 1) capTo('A');
             console.log('GRADE=' + grade);
             console.log('SCORE=' + score);
             console.log('FINDINGS=' + total);
