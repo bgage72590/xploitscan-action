@@ -8,6 +8,14 @@ Scan your code for security vulnerabilities on every pull request. Built for AI-
 - **Configurable fail thresholds** to block merges on critical/high findings
 - **Optional AI false-positive filter** (Claude Haiku, ~$0.01 / scan) to reduce noise on CI runs
 
+## See it in action
+
+- **[Live demo PR →](https://github.com/bgage72590/xploitscan-demo/pull/1)** — real pull request in a deliberately-vulnerable repo. Scroll to the bottom for the `XploitScan Security Report` comment.
+- **[Live Security tab →](https://github.com/bgage72590/xploitscan-demo/security/code-scanning)** — the same findings surfaced as GitHub code-scanning alerts, with one-click navigation to the offending lines.
+- **[Live file-level annotations →](https://github.com/bgage72590/xploitscan-demo/pull/1/files)** — in the "Files changed" tab each finding appears inline next to the vulnerable code, powered by GitHub Advanced Security's SARIF integration.
+
+Every new PR on the [demo repo](https://github.com/bgage72590/xploitscan-demo) is a fresh, self-refreshing example — no stale screenshot to maintain.
+
 ## Usage
 
 Add this to `.github/workflows/xploitscan.yml`:
