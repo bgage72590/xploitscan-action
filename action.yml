@@ -1,5 +1,5 @@
 name: 'XploitScan Security Scanner'
-description: 'Scan your code for security vulnerabilities with 30 core rules (up to 131 with Pro). Built for AI-generated code. Outputs SARIF for GitHub Security tab.'
+description: 'Scan your code for security vulnerabilities with 30 core rules (up to 158 with Pro). Built for AI-generated code. Outputs SARIF for GitHub Security tab.'
 author: 'Cipherline LLC'
 branding:
   icon: 'shield'
@@ -23,7 +23,11 @@ inputs:
     required: false
     default: 'true'
   api-key:
-    description: 'XploitScan API key (xpls_...) — generate one in Settings → API Keys. Required to unlock the full 131-rule Pro set; without it the action runs the 30 free rules.'
+    description: 'XploitScan API key (xpls_...) — generate one in Settings → API Keys. Required to unlock the full 158-rule Pro set; without it the action runs the 30 free rules.'
+    required: false
+    default: ''
+  anthropic-api-key:
+    description: 'Optional Anthropic API key. When set, findings are run through XploitScan''s AI false-positive filter (uses Claude Haiku, ~$0.01 per scan). Reduces noise on CI runs. Get one at https://console.anthropic.com.'
     required: false
     default: ''
 
@@ -58,13 +62,32 @@ runs:
       shell: bash
       env:
         XPLOITSCAN_API_KEY: ${{ inputs.api-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
       run: |
-        # Install xploitscan
-        npm install -g xploitscan@^1.0.0 2>/dev/null || npx --yes xploitscan@^1.0.0 --version
+        # Install xploitscan. Belt-and-suspenders fallback chain:
+        #   1) Try `npm install -g` — fastest path when the runner allows
+        #      global installs.
+        #   2) Fall back to `npx --yes` which installs to a temp prefix
+        #      (works even when global install is restricted).
+        #   3) Trailing `|| true` swallows any residual error — a broken
+        #      published CLI (like the workspace:* spec incident on 1.0.16)
+        #      must never block a customer's CI. The scan commands below
+        #      already `|| true` their own failures; this keeps the install
+        #      stage consistent so `bash -e` can't kill the whole step
+        #      before the scan commands get a chance to run.
+        npm install -g xploitscan@^1.0.0 2>/dev/null || npx --yes xploitscan@^1.0.0 --version 2>/dev/null || true
+
+        # If an Anthropic key is provided, let the CLI run its AI false-positive filter.
+        # Otherwise skip the AI path entirely (matches prior behavior).
+        if [ -n "$ANTHROPIC_API_KEY" ]; then
+          AI_FLAG=""
+        else
+          AI_FLAG="--no-ai"
+        fi
 
         # Run scan with JSON output to a temp file (exit code 1 = findings found, not an error)
         SCAN_JSON=$(mktemp)
-        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format json --no-ai 1>"$SCAN_JSON" 2>/dev/null || true
+        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format json $AI_FLAG 1>"$SCAN_JSON" 2>/dev/null || true
 
         # Parse results — compute grade/score/counts from findings since CLI JSON doesn't include them
         eval "$(node -e "
@@ -120,7 +143,7 @@ runs:
         echo "sarif-file=${{ inputs.sarif-file }}" >> $GITHUB_OUTPUT
 
         # Generate SARIF output (exit code 1 = findings found, not an error)
-        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format sarif --no-ai > "${{ inputs.sarif-file }}" 2>/dev/null || true
+        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --format sarif $AI_FLAG > "${{ inputs.sarif-file }}" 2>/dev/null || true
         # If SARIF file is empty or doesn't exist, write a valid empty SARIF
         if [ ! -s "${{ inputs.sarif-file }}" ]; then
           echo '{"version":"2.1.0","$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json","runs":[{"tool":{"driver":{"name":"XploitScan","version":"1.0.0","rules":[]}},"results":[]}]}' > "${{ inputs.sarif-file }}"
@@ -134,7 +157,7 @@ runs:
         echo "================================="
 
         # Also run terminal output for readable logs (exit code 1 = findings, not error)
-        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" --no-ai 2>&1 || true
+        npx --yes xploitscan@^1.0.0 scan "${{ inputs.path }}" $AI_FLAG 2>&1 || true
 
     - name: Upload SARIF to GitHub Security
       if: hashFiles(inputs.sarif-file) != ''
@@ -165,7 +188,7 @@ runs:
             `> **No scannable code found in this PR.** This PR may only contain config, docs, or text changes. XploitScan analyzes source code files (JS, TS, Python, Go, etc.) — non-code changes are automatically skipped.`,
             ``,
             `---`,
-            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 131 with Pro)*`,
+            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 158 with Pro)*`,
           ].join('\n') : [
             `## ${gradeEmoji} XploitScan Security Report`,
             ``,
@@ -183,7 +206,7 @@ runs:
               : `> Run \`npx xploitscan scan .\` locally for full details with fix suggestions.`,
             ``,
             `---`,
-            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 131 with Pro)*`,
+            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 158 with Pro)*`,
           ].join('\n');
 
           // Find existing comment to update (avoid duplicates)

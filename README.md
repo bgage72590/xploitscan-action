@@ -1,11 +1,12 @@
-# XploitScan Security Scanner - GitHub Action
+# XploitScan Security Scanner — GitHub Action
 
-Scan your code for security vulnerabilities on every pull request. Built for AI-generated code from Cursor, Lovable, Bolt, Replit, and other vibe coding tools.
+Scan your code for security vulnerabilities on every pull request. Built for AI-generated code from Cursor, Lovable, Bolt, Replit, and other vibe-coding tools.
 
-- 30 core security rules (up to 131 with Pro)
-- SARIF output for GitHub Security tab
-- PR comments with security grade and findings summary
-- Configurable fail thresholds to block merges on critical/high issues
+- **158 security rules** (30 in the free tier, full set with a Pro API key)
+- **SARIF output** piped into the GitHub Security tab
+- **PR comments** with a security grade and findings summary
+- **Configurable fail thresholds** to block merges on critical/high findings
+- **Optional AI false-positive filter** (Claude Haiku, ~$0.01 / scan) to reduce noise on CI runs
 
 ## Usage
 
@@ -14,6 +15,12 @@ Add this to `.github/workflows/xploitscan.yml`:
 ```yaml
 name: Security Scan
 on: [push, pull_request]
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -24,6 +31,18 @@ jobs:
           fail-on: critical
 ```
 
+### With a Pro API key (full 158-rule set + AI filter)
+
+```yaml
+      - uses: bgage72590/xploitscan-action@v1
+        with:
+          fail-on: high
+          api-key: ${{ secrets.XPLOITSCAN_API_KEY }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+Generate your Pro API key at **xploitscan.com → Settings → API Keys**.
+
 ## Inputs
 
 | Input | Description | Default |
@@ -32,56 +51,77 @@ jobs:
 | `fail-on` | Fail if findings at this severity or higher: `critical`, `high`, `medium`, `low`, `none` | `none` |
 | `sarif-file` | Path to write SARIF output | `xploitscan-results.sarif` |
 | `comment` | Post a summary comment on PRs | `true` |
+| `api-key` | XploitScan Pro API key (`xpls_...`). Unlocks the full 158-rule set. Without it the action runs the 30 free rules. | `''` |
+| `anthropic-api-key` | Optional Anthropic API key. When set, findings pass through XploitScan's AI false-positive filter (Claude Haiku, ~$0.01 / scan). | `''` |
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
 | `grade` | Security grade (A+ to F) |
-| `score` | Security score (0-100) |
+| `score` | Security score (0–100) |
 | `findings-count` | Total number of findings |
 | `critical-count` | Number of critical findings |
 | `high-count` | Number of high findings |
+| `medium-count` | Number of medium findings |
+| `low-count` | Number of low findings |
 | `sarif-file` | Path to the SARIF output file |
 
 ## What it does
 
-1. Installs and runs `xploitscan` against your codebase
-2. Uploads SARIF results to the GitHub Security tab
-3. Posts a security summary comment on pull requests
-4. Optionally fails the check if findings exceed your threshold
+1. Installs and runs `xploitscan` against your codebase.
+2. Uploads SARIF results to the GitHub Security tab (findings appear as annotations on changed files in the PR).
+3. Posts a security summary comment on pull requests — updates in place on subsequent pushes so you never get comment spam.
+4. Optionally fails the check if findings exceed your `fail-on` threshold.
 
 ## Example PR Comment
 
 When code changes are detected:
 
+> ## 🟡 XploitScan Security Report
+>
 > **Grade: B** | Score: 72/100 | 5 findings
 >
 > | Severity | Count |
 > |----------|-------|
-> | Critical | 1 |
-> | High | 2 |
-> | Medium | 2 |
+> | 🔴 Critical | 1 |
+> | 🟠 High | 2 |
+> | 🟡 Medium | 2 |
+> | 🔵 Low | 0 |
 
-When no scannable code is found (config/docs changes):
+When no scannable code is found (config/docs-only PRs), the comment self-reports instead of falsely green-lighting the PR:
 
+> ## ⚪ XploitScan Security Report
+>
 > **No scannable code found in this PR.** This PR may only contain config, docs, or text changes.
 
-## Supported Languages
+## Supported languages
 
-JavaScript, TypeScript, Python, Ruby, Go, Rust, Java, PHP, Swift, Kotlin, C#, and 30+ more. Also scans Dockerfile, Terraform, Kubernetes, CI/CD workflows, .env files, and package manifests.
+XploitScan's 158-rule set primarily targets **JavaScript, TypeScript, and Node.js** codebases — that's where the rules are deepest (secrets, SQL injection, XSS, SSRF, prototype pollution, crypto misuse, unsafe deserialization, and more). Additional rule coverage extends to Python, Go, and a handful of configuration surfaces (Dockerfile, Terraform, Kubernetes manifests, CI workflows, `.env` files, package manifests) where patterns are transferable.
+
+If you run a polyglot repo, the action will still scan and skip files it doesn't have rules for — you get signal on the supported surfaces without noise elsewhere.
+
+## Pinning the action version
+
+Pin to a major (`@v1`) to get non-breaking updates automatically, or pin to a specific tag (`@v1.3.0`) if your security policy requires exact-version pinning:
+
+```yaml
+- uses: bgage72590/xploitscan-action@v1       # latest v1.x
+- uses: bgage72590/xploitscan-action@v1.3.0   # exact pin
+```
 
 ## Links
 
-- [XploitScan Website](https://xploitscan.com)
+- **[XploitScan website](https://xploitscan.com)**
 - [Documentation](https://xploitscan.com/docs)
 - [CLI on npm](https://www.npmjs.com/package/xploitscan)
+- [Pricing](https://xploitscan.com/pricing)
 - [Changelog](https://xploitscan.com/changelog)
 
 ## License
 
-MIT
+MIT — see [LICENSE](./LICENSE).
 
 ---
 
-Built by [Cipherline LLC](https://xploitscan.com) | [admin@xploitscan.com](mailto:admin@xploitscan.com)
+Built by [Cipherline LLC](https://xploitscan.com) — [admin@xploitscan.com](mailto:admin@xploitscan.com)
