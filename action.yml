@@ -1,5 +1,5 @@
 name: 'XploitScan Security Scanner'
-description: 'Scan your code for security vulnerabilities with 30 core rules (up to 158 with Pro). Built for AI-generated code. Outputs SARIF for GitHub Security tab.'
+description: 'Scan your code for security vulnerabilities with 30 core rules (up to 206 with Pro). Built for AI-generated code. Outputs SARIF for GitHub Security tab.'
 author: 'Cipherline LLC'
 branding:
   icon: 'shield'
@@ -23,7 +23,7 @@ inputs:
     required: false
     default: 'true'
   api-key:
-    description: 'XploitScan API key (xpls_...) — generate one in Settings → API Keys. Required to unlock the full 158-rule Pro set; without it the action runs the 30 free rules.'
+    description: 'XploitScan API key (xpls_...) — generate one in Settings → API Keys. Required to unlock the full 206-rule Pro set; without it the action runs the 30 free rules.'
     required: false
     default: ''
   anthropic-api-key:
@@ -188,7 +188,7 @@ runs:
             `> **No scannable code found in this PR.** This PR may only contain config, docs, or text changes. XploitScan analyzes source code files (JS, TS, Python, Go, etc.) — non-code changes are automatically skipped.`,
             ``,
             `---`,
-            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 158 with Pro)*`,
+            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 206 with Pro)*`,
           ].join('\n') : [
             `## ${gradeEmoji} XploitScan Security Report`,
             ``,
@@ -206,7 +206,7 @@ runs:
               : `> Run \`npx xploitscan scan .\` locally for full details with fix suggestions.`,
             ``,
             `---`,
-            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 158 with Pro)*`,
+            `*Scanned with [XploitScan](https://xploitscan.com) — 30 core security rules for AI-generated code (up to 206 with Pro)*`,
           ].join('\n');
 
           // Find existing comment to update (avoid duplicates)
