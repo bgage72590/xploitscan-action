@@ -26,6 +26,10 @@ inputs:
     description: 'XploitScan API key (xpls_...) — generate one in Settings → API Keys. Required to unlock the full 210+ rule Pro set; without it the action runs the 30 free rules.'
     required: false
     default: ''
+  grade-vendored:
+    description: 'Count findings in vendored, generated, and documentation files (components/ui, __generated__, *.md) toward the grade and the failure threshold. Off by default — those findings are reported and uploaded to the Security tab either way. Set to true if you treat vendored code as yours to maintain.'
+    required: false
+    default: 'false'
   anthropic-api-key:
     description: 'Optional Anthropic API key. When set, findings are run through XploitScan''s AI false-positive filter (uses Claude Haiku, ~$0.01 per scan). Reduces noise on CI runs. Get one at https://console.anthropic.com.'
     required: false
@@ -37,7 +41,11 @@ outputs:
   score:
     description: 'Security score (0-100)'
   findings-count:
-    description: 'Total number of findings'
+    description: 'Total number of findings, including ones not counted toward the grade'
+  graded-findings-count:
+    description: 'Findings that count toward the grade and the failure threshold (excludes vendored/generated/documentation files)'
+  ungraded-count:
+    description: 'Findings in vendored, generated, or documentation files. Reported and uploaded in the SARIF, but not counted toward the grade or the failure threshold.'
   critical-count:
     description: 'Number of critical findings'
   high-count:
@@ -93,12 +101,22 @@ runs:
         eval "$(node -e "
           try {
             const j = JSON.parse(require('fs').readFileSync('$SCAN_JSON', 'utf8'));
-            const f = j.findings || [];
+            const all = j.findings || [];
+            // Findings the CLI flagged as vendored (shadcn/ui primitives under
+            // components/ui, .md docs, __generated__ output) are reported but
+            // not graded — see packages/shared-rules/src/vendored.ts. Grading
+            // them here would red-line CI on scaffold code every project on
+            // the platform ships byte-identically. They stay in FINDINGS and
+            // in the SARIF upload; only the grade and the gate skip them.
+            const gradeVendored = '${{ inputs.grade-vendored }}' === 'true';
+            const f = gradeVendored ? all : all.filter(x => !x.vendored);
+            const ungraded = all.length - f.length;
             const critical = f.filter(x => x.severity === 'critical').length;
             const high = f.filter(x => x.severity === 'high').length;
             const medium = f.filter(x => x.severity === 'medium').length;
             const low = f.filter(x => x.severity === 'low').length;
-            const total = f.length;
+            const total = all.length;
+            const gradedTotal = f.length;
             const files = j.filesScanned || 0;
             // Scoring matches the web dashboard modal and the CLI calculateGrade function.
             // Keep all three in sync — changing one without the others will produce
@@ -117,18 +135,22 @@ runs:
             console.log('GRADE=' + grade);
             console.log('SCORE=' + score);
             console.log('FINDINGS=' + total);
+            console.log('GRADED_FINDINGS=' + gradedTotal);
             console.log('CRITICAL=' + critical);
             console.log('HIGH=' + high);
             console.log('MEDIUM=' + medium);
             console.log('LOW=' + low);
+            console.log('UNGRADED=' + ungraded);
           } catch(e) {
             console.log('GRADE=?');
             console.log('SCORE=0');
             console.log('FINDINGS=0');
+            console.log('GRADED_FINDINGS=0');
             console.log('CRITICAL=0');
             console.log('HIGH=0');
             console.log('MEDIUM=0');
             console.log('LOW=0');
+            console.log('UNGRADED=0');
           }
         ")"
         rm -f "$SCAN_JSON"
@@ -136,10 +158,12 @@ runs:
         echo "grade=$GRADE" >> $GITHUB_OUTPUT
         echo "score=$SCORE" >> $GITHUB_OUTPUT
         echo "findings-count=$FINDINGS" >> $GITHUB_OUTPUT
+        echo "graded-findings-count=$GRADED_FINDINGS" >> $GITHUB_OUTPUT
         echo "critical-count=$CRITICAL" >> $GITHUB_OUTPUT
         echo "high-count=$HIGH" >> $GITHUB_OUTPUT
         echo "medium-count=$MEDIUM" >> $GITHUB_OUTPUT
         echo "low-count=$LOW" >> $GITHUB_OUTPUT
+        echo "ungraded-count=$UNGRADED" >> $GITHUB_OUTPUT
         echo "sarif-file=${{ inputs.sarif-file }}" >> $GITHUB_OUTPUT
 
         # Generate SARIF output (exit code 1 = findings found, not an error)
@@ -153,7 +177,10 @@ runs:
         echo ""
         echo "================================="
         echo "XploitScan Results: Grade $GRADE ($SCORE/100)"
-        echo "Findings: $FINDINGS (Critical: $CRITICAL, High: $HIGH, Medium: $MEDIUM, Low: $LOW)"
+        echo "Findings: $FINDINGS total, $GRADED_FINDINGS graded (Critical: $CRITICAL, High: $HIGH, Medium: $MEDIUM, Low: $LOW)"
+        if [ "${UNGRADED:-0}" -gt 0 ] 2>/dev/null; then
+          echo "Not graded: $UNGRADED finding(s) in vendored, generated, or documentation files"
+        fi
         echo "================================="
 
         # Also run terminal output for readable logs (exit code 1 = findings, not error)
@@ -178,6 +205,10 @@ runs:
           const high = '${{ steps.scan.outputs.high-count }}';
           const medium = '${{ steps.scan.outputs.medium-count }}';
           const low = '${{ steps.scan.outputs.low-count }}';
+          // Severity rows count graded findings; `findings` is the all-in
+          // total. Report the difference explicitly so the table can never
+          // look like it lost findings.
+          const ungraded = '${{ steps.scan.outputs.ungraded-count }}';
 
           const gradeEmoji = {'A+':'🟢','A':'🟢','B':'🟡','C':'🟠','D':'🔴','F':'🔴'}[grade] || '⚪';
           const noCodeScanned = grade === '?' && score === '0' && findings === '0';
@@ -193,6 +224,7 @@ runs:
             `## ${gradeEmoji} XploitScan Security Report`,
             ``,
             `**Grade: ${grade}** | Score: ${score}/100 | ${findings} finding${findings === '1' ? '' : 's'}`,
+            ...(Number(ungraded) > 0 ? [``, `> ${ungraded} finding${ungraded === '1' ? '' : 's'} in vendored, generated, or documentation files ${ungraded === '1' ? 'is' : 'are'} in the Security tab but ${ungraded === '1' ? 'is' : 'are'} not counted in the grade or the table below.`] : []),
             ``,
             `| Severity | Count |`,
             `|----------|-------|`,
@@ -240,7 +272,12 @@ runs:
         FAIL_ON="${{ inputs.fail-on }}"
         CRITICAL="${{ steps.scan.outputs.critical-count }}"
         HIGH="${{ steps.scan.outputs.high-count }}"
-        FINDINGS="${{ steps.scan.outputs.findings-count }}"
+        # The gate counts graded findings only. Vendored/generated/docs
+        # findings are reported and uploaded, but a shadcn/ui primitive that
+        # ships byte-identically in every project on the platform must not
+        # red-line everyone's CI. See packages/shared-rules/src/vendored.ts.
+        FINDINGS="${{ steps.scan.outputs.graded-findings-count }}"
+        UNGRADED="${{ steps.scan.outputs.ungraded-count }}"
 
         if [ "$FAIL_ON" = "none" ]; then
           echo "XploitScan: No failure threshold set. Passing."
@@ -261,4 +298,7 @@ runs:
           exit 1
         fi
 
+        if [ "${UNGRADED:-0}" -gt 0 ] 2>/dev/null; then
+          echo "XploitScan: $UNGRADED finding(s) in vendored, generated, or documentation files were reported but not counted toward this gate."
+        fi
         echo "XploitScan: No findings above the '$FAIL_ON' threshold. Passing."
