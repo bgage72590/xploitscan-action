@@ -35,27 +35,43 @@ inputs:
     required: false
     default: ''
 
+# A composite action only exposes an output if the entry carries a `value:`
+# mapping — a `description:` alone silently yields the empty string. All eight
+# of these were description-only, so every documented output of this action has
+# always resolved to "". Nothing caught it because the action's own PR comment
+# reads the internal step outputs directly; the first external consumer was
+# .github/workflows/security-scan.yml, which rendered "Grade **true**".
 outputs:
   grade:
     description: 'Security grade (A+ to F)'
+    value: ${{ steps.scan.outputs.grade }}
   score:
     description: 'Security score (0-100)'
+    value: ${{ steps.scan.outputs.score }}
   findings-count:
     description: 'Total number of findings, including ones not counted toward the grade'
+    value: ${{ steps.scan.outputs.findings-count }}
   graded-findings-count:
     description: 'Findings that count toward the grade and the failure threshold (excludes vendored/generated/documentation files)'
+    value: ${{ steps.scan.outputs.graded-findings-count }}
   ungraded-count:
     description: 'Findings in vendored, generated, or documentation files. Reported and uploaded in the SARIF, but not counted toward the grade or the failure threshold.'
+    value: ${{ steps.scan.outputs.ungraded-count }}
   critical-count:
     description: 'Number of critical findings'
+    value: ${{ steps.scan.outputs.critical-count }}
   high-count:
     description: 'Number of high findings'
+    value: ${{ steps.scan.outputs.high-count }}
   medium-count:
     description: 'Number of medium findings'
+    value: ${{ steps.scan.outputs.medium-count }}
   low-count:
     description: 'Number of low findings'
+    value: ${{ steps.scan.outputs.low-count }}
   sarif-file:
     description: 'Path to the SARIF output file'
+    value: ${{ steps.scan.outputs.sarif-file }}
 
 runs:
   using: 'composite'
