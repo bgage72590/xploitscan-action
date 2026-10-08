@@ -2,11 +2,11 @@
 
 Scan your code for security vulnerabilities on every pull request. Built for AI-generated code from Cursor, Lovable, Bolt, Replit, and other vibe-coding tools.
 
-- **158 security rules** (30 in the free tier, full set with a Pro API key)
+- **223 security rules** (30 in the free tier, full set with a paid-plan API key)
 - **SARIF output** piped into the GitHub Security tab
 - **PR comments** with a security grade and findings summary
 - **Configurable fail thresholds** to block merges on critical/high findings
-- **Optional AI false-positive filter** (Claude Haiku, ~$0.01 / scan) to reduce noise on CI runs
+- **Optional AI false-positive filter** via separate Anthropic API key (Claude Haiku, ~$0.01 / scan) to reduce noise on CI runs
 
 ## See it in action
 
@@ -39,7 +39,20 @@ jobs:
           fail-on: critical
 ```
 
-### With a Pro API key (full 158-rule set + AI filter)
+### With a paid-plan API key (full 223-rule set)
+
+```yaml
+      - uses: bgage72590/xploitscan-action@v1
+        with:
+          fail-on: high
+          api-key: ${{ secrets.XPLOITSCAN_API_KEY }}
+```
+
+**API keys are available on Indie, Pro, and Team plans** — free accounts cannot create one. Subscribe at [xploitscan.com/pricing](https://xploitscan.com/pricing), then generate your key at **Settings → API Keys**.
+
+### With AI false-positive filtering
+
+Add an Anthropic API key to run findings through XploitScan's AI filter (uses Claude Haiku, ~$0.01 / scan):
 
 ```yaml
       - uses: bgage72590/xploitscan-action@v1
@@ -49,18 +62,20 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-Generate your Pro API key at **xploitscan.com → Settings → API Keys**.
+Get an Anthropic API key at [console.anthropic.com](https://console.anthropic.com). The AI filter is separate from the XploitScan API key and works independently.
 
 ## Inputs
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `path` | Path to scan | `.` |
-| `fail-on` | Fail if findings at this severity or higher: `critical`, `high`, `medium`, `low`, `none` | `none` |
+| `path` | Path to scan (default: current directory) | `.` |
+| `fail-on` | Fail the action if findings of this severity or higher are found: `critical`, `high`, `medium`, `low`, `none` | `none` |
 | `sarif-file` | Path to write SARIF output | `xploitscan-results.sarif` |
-| `comment` | Post a summary comment on PRs | `true` |
-| `api-key` | XploitScan Pro API key (`xpls_...`). Unlocks the full 158-rule set. Without it the action runs the 30 free rules. | `''` |
-| `anthropic-api-key` | Optional Anthropic API key. When set, findings pass through XploitScan's AI false-positive filter (Claude Haiku, ~$0.01 / scan). | `''` |
+| `comment` | Post a summary comment on pull requests | `true` |
+| `api-key` | XploitScan API key (`xpls_...`) — generate one in Settings → API Keys. Required to unlock the full 223-rule Pro set; without it the action runs the 30 free rules. **API keys are available on Indie, Pro, and Team plans only.** | `''` |
+| `fail-on-quality` | Also fail the action on high-severity code-quality findings (QA…). Off by default: quality findings are reported either way, and the exit code is a contract with pipelines that were passing before they existed. See [xploitscan.com/quality](https://xploitscan.com/quality) | `false` |
+| `grade-vendored` | Count findings in vendored, generated, and documentation files (components/ui, __generated__, *.md) toward the grade and the failure threshold. Off by default — those findings are reported and uploaded to the Security tab either way. Set to `true` if you treat vendored code as yours to maintain. | `false` |
+| `anthropic-api-key` | Optional Anthropic API key. When set, findings are run through XploitScan's AI false-positive filter (uses Claude Haiku, ~$0.01 per scan). Reduces noise on CI runs. Get one at [console.anthropic.com](https://console.anthropic.com). | `''` |
 
 ## Outputs
 
@@ -68,7 +83,11 @@ Generate your Pro API key at **xploitscan.com → Settings → API Keys**.
 |--------|-------------|
 | `grade` | Security grade (A+ to F) |
 | `score` | Security score (0–100) |
-| `findings-count` | Total number of findings |
+| `findings-count` | Total number of findings, including ones not counted toward the grade |
+| `graded-findings-count` | Findings that count toward the grade and the failure threshold (excludes vendored/generated/documentation files) |
+| `ungraded-count` | Findings in vendored, generated, or documentation files. Reported and uploaded in the SARIF, but not counted toward the grade or the failure threshold. |
+| `quality-count` | Code-quality findings (QA…). Never counted toward the grade or the severity counts; see `fail-on-quality`. |
+| `quality-high-count` | Code-quality findings at high severity or above. |
 | `critical-count` | Number of critical findings |
 | `high-count` | Number of high findings |
 | `medium-count` | Number of medium findings |
@@ -105,17 +124,17 @@ When no scannable code is found (config/docs-only PRs), the comment self-reports
 
 ## Supported languages
 
-XploitScan's 158-rule set primarily targets **JavaScript, TypeScript, and Node.js** codebases — that's where the rules are deepest (secrets, SQL injection, XSS, SSRF, prototype pollution, crypto misuse, unsafe deserialization, and more). Additional rule coverage extends to Python, Go, and a handful of configuration surfaces (Dockerfile, Terraform, Kubernetes manifests, CI workflows, `.env` files, package manifests) where patterns are transferable.
+XploitScan's 223-rule set primarily targets **JavaScript, TypeScript, and Node.js** codebases — that's where the rules are deepest (secrets, SQL injection, XSS, SSRF, prototype pollution, crypto misuse, unsafe deserialization, and more). Additional rule coverage extends to Python, Go, and a handful of configuration surfaces (Dockerfile, Terraform, Kubernetes manifests, CI workflows, `.env` files, package manifests) where patterns are transferable.
 
 If you run a polyglot repo, the action will still scan and skip files it doesn't have rules for — you get signal on the supported surfaces without noise elsewhere.
 
 ## Pinning the action version
 
-Pin to a major (`@v1`) to get non-breaking updates automatically, or pin to a specific tag (`@v1.3.0`) if your security policy requires exact-version pinning:
+Pin to a major (`@v1`) to get non-breaking updates automatically, or pin to a specific tag (`@v1.4.0`) if your security policy requires exact-version pinning:
 
 ```yaml
 - uses: bgage72590/xploitscan-action@v1       # latest v1.x
-- uses: bgage72590/xploitscan-action@v1.3.0   # exact pin
+- uses: bgage72590/xploitscan-action@v1.4.0   # exact pin
 ```
 
 ## Links
