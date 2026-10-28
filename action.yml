@@ -39,9 +39,13 @@ inputs:
     required: false
     default: 'false'
   anthropic-api-key:
-    description: 'Optional Anthropic API key. When set, findings are run through XploitScan''s AI false-positive filter (uses Claude Haiku, ~$0.01 per scan). Reduces noise on CI runs. Get one at https://console.anthropic.com.'
+    description: 'Optional Anthropic API key for AI review. With a key set, the Action sends your code to Anthropic directly, under your own Anthropic account and not through XploitScan, in chunks of whole files and excerpts around each finding. Set the ai input to false to turn it off.'
     required: false
     default: ''
+  ai:
+    description: '`ai` — set to `false` to send no code to Anthropic even when `anthropic-api-key` is set. `ai: false` in .xploitscanrc takes effect in the Action only after its CLI pin is bumped to a CLI release that adds the `ai` setting.'
+    required: false
+    default: 'true'
 
 # A composite action only exposes an output if the entry carries a `value:`
 # mapping — a `description:` alone silently yields the empty string. All eight
@@ -105,6 +109,7 @@ runs:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_GRADE_VENDORED: ${{ inputs.grade-vendored }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+        INPUT_AI: ${{ inputs.ai }}
         # One exact CLI release. A later bump changes this line only; the
         # install and every scan below read the variable. Do not put a
         # semver range here.
@@ -130,9 +135,22 @@ runs:
           exit 1
         fi
 
-        # If an Anthropic key is provided, let the CLI run its AI false-positive filter.
-        # Otherwise skip the AI path entirely (matches prior behavior).
+        # One AI pass. The JSON scan computes the status and writes it.
+        # SARIF and terminal reuse that file and do not call the provider.
+        # ai:false unsets the key for every CLI step, including JSON.
+        AI_STATUS_FILE=$(mktemp)
+        export XPLOITSCAN_AI_STATUS_FILE="$AI_STATUS_FILE"
+        AI_KEY_PRESENT=0
         if [ -n "$ANTHROPIC_API_KEY" ]; then
+          AI_KEY_PRESENT=1
+        fi
+        # The shell unset is the control that keeps the key off the CLI.
+        # INPUT_AI is lowercased so False and FALSE match the same as false.
+        AI_INPUT=$(printf '%s' "$INPUT_AI" | tr '[:upper:]' '[:lower:]')
+        if [ "$AI_INPUT" = "false" ]; then
+          AI_FLAG="--no-ai"
+          unset ANTHROPIC_API_KEY
+        elif [ -n "$ANTHROPIC_API_KEY" ]; then
           AI_FLAG=""
         else
           AI_FLAG="--no-ai"
@@ -152,6 +170,10 @@ runs:
           cat "$SCAN_ERR" >&2
         fi
         node "$GITHUB_ACTION_PATH/assert-scan-output.js" "$SCAN_STATUS" "$SCAN_JSON"
+        # Later passes must not send code again. The published CLI pin does
+        # not read the status file yet, so unsetting the key is what stops it.
+        unset ANTHROPIC_API_KEY
+        AI_FLAG="--no-ai"
 
         # Parse results. Current CLI JSON includes grade and score; recompute
         # anyway so a published CLI that predates those fields still grades
@@ -328,6 +350,16 @@ runs:
         if [ "${UNGRADED:-0}" -gt 0 ] 2>/dev/null; then
           echo "Not graded: $UNGRADED finding(s) in vendored, generated, documentation, or test files"
         fi
+        if [ "$INPUT_AI" = "false" ]; then
+          AI_LINE="AI review skipped: user opted out."
+        elif [ "$AI_KEY_PRESENT" != "1" ]; then
+          AI_LINE="AI review skipped: no Anthropic API key is set."
+        else
+          # This pin does not emit AI status. Do not claim a review from it.
+          AI_LINE="AI review status is unknown on this CLI pin."
+        fi
+        echo "$AI_LINE"
+        echo "ai-line=$AI_LINE" >> $GITHUB_OUTPUT
         echo "================================="
 
         # Terminal output for the job log. Exit 1 is findings, not a crash.
@@ -346,6 +378,7 @@ runs:
       continue-on-error: true
 
     - name: Post PR Comment
+      id: comment
       if: github.event_name == 'pull_request' && inputs.comment == 'true'
       uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
       env:
@@ -357,6 +390,7 @@ runs:
         SCAN_MEDIUM: ${{ steps.scan.outputs.medium-count }}
         SCAN_LOW: ${{ steps.scan.outputs.low-count }}
         SCAN_UNGRADED: ${{ steps.scan.outputs.ungraded-count }}
+        SCAN_AI_LINE: ${{ steps.scan.outputs.ai-line }}
       with:
         script: |
           const grade = process.env.SCAN_GRADE;
@@ -385,6 +419,7 @@ runs:
             `## ${gradeEmoji} XploitScan Security Report`,
             ``,
             `**Grade: ${grade}** | Score: ${score}/100 | ${findings} finding${findings === '1' ? '' : 's'}`,
+            process.env.SCAN_AI_LINE || "",
             ...(Number(ungraded) > 0 ? [``, `> ${ungraded} finding${ungraded === '1' ? '' : 's'} in vendored, generated, documentation, or test files ${ungraded === '1' ? 'is' : 'are'} in the Security tab but ${ungraded === '1' ? 'is' : 'are'} not counted in the grade or the table below.`] : []),
             ``,
             `| Severity | Count |`,
@@ -449,3 +484,8 @@ runs:
         QUALITY_HIGH: ${{ steps.scan.outputs.quality-high-count }}
         FAIL_ON_QUALITY: ${{ inputs.fail-on-quality }}
       run: bash "$GITHUB_ACTION_PATH/check-failure-threshold.sh"
+
+    - name: Note comment or summary failure
+      if: always() && steps.comment.outcome == 'failure'
+      shell: bash
+      run: echo "PR comment/summary step failed" >> "$GITHUB_STEP_SUMMARY"
