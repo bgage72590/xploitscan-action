@@ -113,7 +113,7 @@ runs:
         # One exact CLI release. A later bump changes this line only; the
         # install and every scan below read the variable. Do not put a
         # semver range here.
-        XPLOITSCAN_CLI_VERSION: "1.18.14"
+        XPLOITSCAN_CLI_VERSION: "1.18.15"
       run: |
         # Install once into a temp prefix and reuse that binary. A failed
         # install fails the job. Swallowing it used to let the rest of the
