@@ -39,7 +39,7 @@ jobs:
           fail-on: critical
 ```
 
-`@v1` tracks the latest v1 release. Pin the action to a full commit SHA so a moved tag cannot change what runs: `uses: bgage72590/xploitscan-action@b5db3d14ea5ca2d3d5f9f6cf59ed307a6634bc85 # v1.11.0`.
+`@v1` tracks the latest v1 release. Pin the action to a full commit SHA so a moved tag cannot change what runs: `uses: bgage72590/xploitscan-action@52a70ac6e502f6872d7dcd974a49ff9560c8e528 # v1.11.4`.
 
 `security-events: write` is needed only for the code-scanning upload. If you set `upload-sarif: 'false'`, you can leave it out. The SARIF file is still written to `sarif-file`, for example to save as a workflow artifact.
 
@@ -122,7 +122,7 @@ If you run a polyglot repo, the action will still scan and skip files it doesn't
 
 ```yaml
 - uses: bgage72590/xploitscan-action@v1 # floating v1
-- uses: bgage72590/xploitscan-action@b5db3d14ea5ca2d3d5f9f6cf59ed307a6634bc85 # v1.11.0
+- uses: bgage72590/xploitscan-action@52a70ac6e502f6872d7dcd974a49ff9560c8e528 # v1.11.4
 ```
 
 ## Links
